@@ -1,0 +1,154 @@
+import { Router } from "express";
+import type { Db } from "@openblock/db";
+import {
+  createCompanySchema,
+  updateCompanySchema,
+} from "@openblock/shared";
+import { forbidden } from "../errors.js";
+import { validate } from "../middleware/validate.js";
+import { companyService, logActivity } from "../services/index.js";
+import { companyBlocksService } from "../services/company-blocks.js";
+import { assertBoard, assertCompanyAccess } from "./authz.js";
+
+export function companyRoutes(db: Db) {
+  const router = Router();
+  const svc = companyService(db);
+  const blocksSvc = companyBlocksService(db);
+
+  router.get("/", async (req, res) => {
+    assertBoard(req);
+    const result = await svc.list();
+    if (req.actor.source === "local_implicit" || req.actor.isInstanceAdmin) {
+      res.json(result);
+      return;
+    }
+    const allowed = new Set(req.actor.companyIds ?? []);
+    res.json(result.filter((company) => allowed.has(company.id)));
+  });
+
+  router.get("/stats", async (req, res) => {
+    assertBoard(req);
+    const allowed = req.actor.source === "local_implicit" || req.actor.isInstanceAdmin
+      ? null
+      : new Set(req.actor.companyIds ?? []);
+    const stats = await svc.stats();
+    if (!allowed) {
+      res.json(stats);
+      return;
+    }
+    const filtered = Object.fromEntries(Object.entries(stats).filter(([companyId]) => allowed.has(companyId)));
+    res.json(filtered);
+  });
+
+  // Common malformed path when companyId is empty in "/api/companies/{companyId}/issues".
+  router.get("/issues", (_req, res) => {
+    res.status(400).json({
+      error: "Missing companyId in path. Use /api/companies/{companyId}/issues.",
+    });
+  });
+
+  router.get("/:companyId", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const company = await svc.getById(companyId);
+    if (!company) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    res.json(company);
+  });
+
+  router.post("/", validate(createCompanySchema), async (req, res) => {
+    assertBoard(req);
+    if (!(req.actor.source === "local_implicit" || req.actor.isInstanceAdmin)) {
+      throw forbidden("Instance admin required");
+    }
+    const company = await svc.create(req.body);
+    await logActivity(db, {
+      companyId: company.id,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "company.created",
+      entityType: "company",
+      entityId: company.id,
+      details: { name: company.name },
+    });
+    res.status(201).json(company);
+  });
+
+  router.patch("/:companyId", validate(updateCompanySchema), async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const company = await svc.update(companyId, req.body);
+    if (!company) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    await logActivity(db, {
+      companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "company.updated",
+      entityType: "company",
+      entityId: companyId,
+      details: req.body,
+    });
+    res.json(company);
+  });
+
+  router.post("/:companyId/archive", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const company = await svc.archive(companyId);
+    if (!company) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    await logActivity(db, {
+      companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "company.archived",
+      entityType: "company",
+      entityId: companyId,
+    });
+    res.json(company);
+  });
+
+  router.delete("/:companyId", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const company = await svc.remove(companyId);
+    if (!company) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  // ── Workspace block management ──
+
+  router.get("/:companyId/blocks", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    const enabledBlocks = await blocksSvc.listEnabled(companyId);
+    res.json(enabledBlocks);
+  });
+
+  router.post("/:companyId/blocks/:blockName", async (req, res) => {
+    const { companyId, blockName } = req.params;
+    await blocksSvc.enable(companyId, blockName);
+    res.json({ ok: true });
+  });
+
+  router.delete("/:companyId/blocks/:blockName", async (req, res) => {
+    const { companyId, blockName } = req.params;
+    await blocksSvc.disable(companyId, blockName);
+    res.json({ ok: true });
+  });
+
+  return router;
+}

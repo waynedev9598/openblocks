@@ -1,0 +1,12 @@
+node_modules
+dist
+.vite
+*.tsbuildinfo
+.env
+.env.local
+.mcp.json
+bun.lock
+channels/
+__pycache__/
+.claude/
+.agents/

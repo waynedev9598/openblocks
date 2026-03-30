@@ -1,0 +1,9 @@
+export { healthRoutes } from "./health.js";
+export { companyRoutes } from "./companies.js";
+export { projectRoutes } from "./projects.js";
+export { issueRoutes } from "./issues.js";
+export { goalRoutes } from "./goals.js";
+export { activityRoutes } from "./activity.js";
+export { dashboardRoutes } from "./dashboard.js";
+export { assetRoutes } from "./assets.js";
+export { documentRoutes } from "./documents.js";
