@@ -15,6 +15,13 @@
       "when": 1774866564785,
       "tag": "0001_lovely_nightmare",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774887137039,
+      "tag": "0002_naive_bromley",
+      "breakpoints": true
     }
   ]
 }
